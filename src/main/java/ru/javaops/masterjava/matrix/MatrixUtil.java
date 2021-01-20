@@ -1,8 +1,9 @@
 package ru.javaops.masterjava.matrix;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.*;
 
 /**
  * gkislin
@@ -10,29 +11,102 @@ import java.util.concurrent.ExecutorService;
  */
 public class MatrixUtil {
 
-    // TODO implement parallel multiplication matrixA*matrixB
+    /*
+          Average single thread time, sec: 1,509
+          Average concurrent thread time, sec: 1,465
+
+          1 opt
+          Average single thread time, sec: 1,523
+          Average concurrent thread time, sec: 0,486
+
+           Multithreading
+           Average single thread time, sec: 0,284
+           Average concurrent thread time, sec: 0,051
+        * */
+
     public static int[][] concurrentMultiply(int[][] matrixA, int[][] matrixB, ExecutorService executor) throws InterruptedException, ExecutionException {
         final int matrixSize = matrixA.length;
         final int[][] matrixC = new int[matrixSize][matrixSize];
 
+        final int[][] matrixBTransp = new int[matrixSize][matrixSize];
+        for(int i = 0; i < matrixSize; i++) {
+            for(int j = 0; j < matrixSize; j++) {
+                matrixBTransp[j][i] = matrixB[i][j];
+            }
+        }
+
+        final CompletionService<CalcOneRowResultWrapper> completionService = new ExecutorCompletionService<>(executor);
+
+        List<Future<CalcOneRowResultWrapper>> futureTasks = new ArrayList<>();
+
+        for (int i = 0; i < matrixSize; i++) {
+            int finalI = i;
+            futureTasks.add(completionService.submit(()-> calcForOneRowAndWrap(matrixA, matrixBTransp, finalI)));
+        }
+
+        while (!futureTasks.isEmpty()) {
+            Future<CalcOneRowResultWrapper> future = completionService.poll(1, TimeUnit.SECONDS);
+            CalcOneRowResultWrapper wrapper = future.get();
+            matrixC[wrapper.getRowNum()] = wrapper.getResult();
+            futureTasks.remove(future);
+        }
+
         return matrixC;
     }
 
-    // TODO optimize by https://habrahabr.ru/post/114797/
+
     public static int[][] singleThreadMultiply(int[][] matrixA, int[][] matrixB) {
         final int matrixSize = matrixA.length;
         final int[][] matrixC = new int[matrixSize][matrixSize];
 
-        for (int i = 0; i < matrixSize; i++) {
-            for (int j = 0; j < matrixSize; j++) {
-                int sum = 0;
-                for (int k = 0; k < matrixSize; k++) {
-                    sum += matrixA[i][k] * matrixB[k][j];
-                }
-                matrixC[i][j] = sum;
+        final int[][] matrixBTransp = new int[matrixSize][matrixSize];
+        for(int i = 0; i < matrixSize; i++) {
+            for(int j = 0; j < matrixSize; j++) {
+                matrixBTransp[j][i] = matrixB[i][j];
             }
         }
+
+        for (int i = 0; i < matrixSize; i++) {
+            matrixC[i]  = calcForOneRow(matrixA, matrixBTransp, i);
+        }
         return matrixC;
+    }
+
+    private static int[] calcForOneRow(int[][] matrixA, int[][] matrixBT, int rowNumA) {
+        final int matrixSize = matrixA.length;
+        final int[] calculatedRow = new int[matrixSize];
+
+        for (int j = 0; j < matrixSize; j++) {
+            int sum = 0;
+            for (int k = 0; k < matrixSize; k++) {
+                sum += matrixA[rowNumA][k] * matrixBT[j][k];
+            }
+            calculatedRow[j] = sum;
+        }
+
+        return calculatedRow;
+    }
+
+    private static class CalcOneRowResultWrapper {
+        private final int rowNum;
+        private final int[] result;
+
+        public CalcOneRowResultWrapper(int rowNum, int[] result) {
+            this.rowNum = rowNum;
+            this.result = result;
+        }
+
+        public int getRowNum() {
+            return rowNum;
+        }
+
+        public int[] getResult() {
+            return result;
+        }
+    }
+
+    private static CalcOneRowResultWrapper calcForOneRowAndWrap(int[][] matrixA, int[][] matrixBT, int rowNumA) {
+        return new CalcOneRowResultWrapper(rowNumA, calcForOneRow(matrixA, matrixBT, rowNumA));
     }
 
     public static int[][] create(int size) {
